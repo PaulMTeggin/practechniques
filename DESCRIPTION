@@ -1,11 +1,20 @@
 Package: practechniques
 Type: Package
-Title: What the Package Does (Title Case)
+Title: Functions for the Practical Actuarial Techniques online book
 Version: 0.1.0
-Author: Who wrote it
-Maintainer: The package maintainer <yourself@somewhere.net>
-Description: More about what it does (maybe more than one line)
-    Use four spaces when indenting paragraphs within the Description.
-License: What license is it under?
+Author: Paul Teggin
+Maintainer: Paul Teggin <paul.teggin@polyact.co.uk>
+Description: This packages contains functions implementing techniques set out in the
+    Practical Actuarial Techniques online book.
+License: GPL (>= 3)
 Encoding: UTF-8
 LazyData: true
+RoxygenNote: 7.1.2
+Suggests: 
+    ADGofTest,
+    KScorrect,
+    testthat (>= 3.0.0)
+Imports: 
+    doParallel,
+    doRNG,
+    foreach
