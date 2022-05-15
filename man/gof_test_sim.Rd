@@ -9,7 +9,7 @@ gof_test_sim(
   test_type = c("KS", "AD"),
   dist = "norm",
   noverlap = 1,
-  fn_estimate_params = estimate_MoM_2,
+  fn_estimate_params = estimate_mean_sd_ol,
   nreps = 999,
   parallelise = FALSE,
   ncores = NULL,
@@ -29,12 +29,17 @@ a probability function, and by \code{"r"} to get a random simulation function.
 For example \code{"norm"} or \code{"unif"}.}
 
 \item{noverlap}{The extent of any overlap in the data. \code{1} means no overlap,
-and the test operates by ordinary simulation. If \code{noverlap > 1} then
-autocorrelation will be induced in the simulations that is consistent with the degree of overlap,
-to give unbiased test results. \code{fn_estimate_params} must also allow for the degree of overlap.}
+and \code{fn_simulate} should operate by ordinary simulation. If \code{noverlap > 1} then
+autocorrelation must be induced in the simulations that is consistent with the degree of overlap,
+to give unbiased test results.
+This is done automatically when this function is called via \code{\link{gof_test_sim}}.
+\code{fn_estimate_params} must also allow for the degree of overlap.}
 
-\item{fn_estimate_params}{A function that takes the data and returns an object representing
-the parameters of the distribution being fitted.}
+\item{fn_estimate_params}{A function that takes the data and the extent of the overlap in the data,
+and returns a single object holding estimated parameters of the distribution being fitted.
+The method of estimation should be unbiased. Note that for many distributions, MLE
+only gives \emph{asymptotically} unbiased parameters. Users should validate that their estimation
+functions are unbiased and if necessary adjust the threshold p-value to compensate for this.}
 
 \item{nreps}{The number of repetitions of the simulation to use.}
 
@@ -43,7 +48,7 @@ the parameters of the distribution being fitted.}
 \item{ncores}{The number of cores to use when parallelising.
 \code{NULL} means one fewer than the number of cores on the machine.}
 
-\item{bs_ci}{The width of a confidence interval around the p value,
+\item{bs_ci}{The width of a confidence interval around the p-value,
 which will be calculated using a non-parametric bootstrap.
 \code{NULL} means no confidence interval will be produced.}
 
@@ -51,32 +56,66 @@ which will be calculated using a non-parametric bootstrap.
 }
 \value{
 A list with five components:
-\itemize{
-  \item{ts}{The test statistic.}
-  \item{p_value}{The p value for the test statistic, derived by simulation.}
-  \item{count_NA}{The number of \code{NA} values produced in the simulation of the test statistic.
-  These generally indicate that the parameter estimation failed.}
-  \item{p_value_lower}{If \code{bs_ci} is not \code{NULL}, the lower end
-  of the confidence interval around the p value, calculated using
-  a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
-  Otherwise \code{NA}.}
-  \item{p_value_upper}{If \code{bs_ci} is not \code{NULL}, the upper end
-  of the confidence interval around the p value, calculated using
-  a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
-  Otherwise \code{NA}.}
+\describe{
+\item{ts}{The test statistic.}
+\item{p_value}{The p-value for the test statistic, derived by simulation.}
+\item{count_NA}{The number of \code{NA} values produced in the simulation of the test statistic.
+These generally indicate that the parameter estimation failed.}
+\item{p_value_lower}{If \code{bs_ci} is not \code{NULL}, the lower end
+of the confidence interval around the p-value, calculated using
+a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
+Otherwise \code{NA}.}
+\item{p_value_upper}{If \code{bs_ci} is not \code{NULL}, the upper end
+of the confidence interval around the p-value, calculated using
+a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
+Otherwise \code{NA}.}
 }
 }
 \description{
 Many statistical tests have null hypotheses that assume a distribution is fully specified
 (with its parameters known in advance). It is common to estimate parameters from data,
 and in this case a general method for adapting the statistical test is to use
-simulation to derive the distribution of the test statistic, and derive the p-value from this distribution.
+Monte Carlo to produce a simulated distribution of the test statistic, and derive the p-value from this distribution.
+This approach is used in the \code{\link[KScorrect]{LcKS}} function of the \code{KScorrect} package.
+However, the implementation in \code{LcKS} only supports the KS test and a closed list of distributions,
+because it has bespoke code for each supported distribution
+for estimating parameters and simulating values using the estimated parameters.
+This function generalises the approach in \code{\link[KScorrect]{LcKS}} as explained in the documentation
+of \code{\link{gof_test_sim_uniparam}}. It is a higher-level function
+that configures \code{\link{gof_test_sim_uniparam}} appropriately given the name of the distribution being
+tested against. It is still necessary to provide an appropriate estimation function for \code{fn_estimate_params}
+that is adapted to the distribution being tested including whether or not data is overlapping.
 }
 \details{
-TODO explain relationship to gof_test_sim_uniparam
+As far as possible this function abstracts from
+the lower-level implementation details of \code{\link{gof_test_sim_uniparam}}, by taking the name of
+a distribution function (e.g. \code{"norm"}) and creating uniparameter versions of the CDF
+("p" function, so \code{pnorm} in this example) and simulation ("r" functions, here \code{rnorm}).
+Where overlapping data is used (\code{noverlap > 1}) it will simulate from a Gaussian copula
+to induce the same autocorrelation structure as overlapping data
+(see \code{\link{calc_theo_sercor}}), convert this to autocorrelated random uniform values,
+and apply a uniparameter version of the inverse CDF ("q" function) for \code{"dist"}.
+
+Notwithstanding this abstraction, it is necessary to supply an appropriate parameter estimation function
+for \code{fn_estimate_params}. \code{\link{estimate_mean_sd_ol}} is used by default, to match with the
+default value of \code{dist = "norm"}.
+
+The framework here can in principle also be used where parameters are known in advance
+rather than estimated from the data (by making the estimation function return the pre-specified parameters),
+but there is very little value to this use case, as Monte Carlo is rarely necessary
+when the parameters are known (and is certainly not necessary for the KS and AD tests).
+
+Optionally, the calculations can be parallelised over multiple cores.
+This is useful when the number of simulations is large
+and estimation of parameters is slow,
+for example using MLE to estimate parameters from a generalised hyperbolic distribution.
+
+Since Monte Carlo simulation is used, the function can optionally estimate the simulation uncertainty arising from
+a finite number of simulations, using a non-parameteric (resampling with replacement) approach from
+the distribution of simulated test statistics produced.
 }
 \examples{
 gof_test_sim(rnorm(100))
-estimate_unif <- function(x) list(min = min(x), max = max(x))
+estimate_unif <- function(x, noverlap = 1) list(min = min(x), max = max(x))
 gof_test_sim(runif(100), dist = "unif", fn_estimate_params = estimate_unif)
 }

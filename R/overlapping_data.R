@@ -4,15 +4,17 @@
 #' between successive overlapping observations. The amount of serial correlation
 #' is a function of the lag between observations and the extent of the overlap.
 #' For example the serial correlation between Jan-Dec and Feb-Jan observations is higher
-#' than between Jan-Dec and Sep-Aug observations.
+#' than between Jan-Dec and Sep-Aug-next-year observations.
 #'
 #' The formula follows from writing each overlapping observation as the sum of
-#' \code{noverlap} independent observations and counting the extent to which these two sets overlap.
+#' `noverlap` independent observations and counting the extent to which these two sets overlap.
+#' Where the lag is higher than the overlap no information is shared and the theoretical
+#' serial correlation becomes zero.
 #'
 #' @param noverlap The extent of the overlap, e.g. 12 means annual overlaps from monthly data.
 #'   1 means no overlap.
 #' @param lag The lag in time between two overlapped observations.
-#'   The serial correlation at lags equal to or higher than \code{noverlap} is zero.
+#'   The serial correlation at lags equal to or higher than `noverlap` is zero.
 #'
 #' @return The theoretical serial correlation.
 #' @family Overlapping data functions
@@ -28,7 +30,7 @@ calc_theo_sercor <- function(noverlap, lag) {
 #'
 #' The rows and columns of the matrix represent indexes to the overlapped data.
 #' All values on the leading diagonal will be 1, since a variable is always perfectly correlated
-#' with itself. Values off the diagonal will depend on the size of the overlap (\code{noverlap}).
+#' with itself. Values off the diagonal will depend on the size of the overlap (`noverlap`).
 #'
 #' @param N The size of the matrix (number of rows and columns)
 #' @inheritParams calc_theo_sercor
@@ -52,14 +54,21 @@ build_theo_sercor_mtx <- function(N, noverlap) {
 #' It assumes [Bessel's correction](https://en.wikipedia.org/wiki/Bessel%27s_correction)
 #' has already been applied in the calculation of the sample
 #' standard deviation and removes this to avoid double-counting.
+#' In practice this means this factor can be applied to the results of \code{\link[stats]{sd}}.
+#'
+#' The factor is derived in a
+#' [2009 Risk.net article](https://www.risk.net/risk-management/1509219/error-var-overlapping-intervals)
+#' by Sun, Nelken et al. Where `noverlap == 1` the factor is 1 and has no numerical effect.
 #'
 #' @param N The number of overlapped data points.
-#'   There will be N + noverlap - 1 in the data prior to taking overlapped samples,
-#'   which reduces to N after overlapping by \code{noverlap}.
-#'   E.g. need 11 more observations than N in order to have N annual monthly-overlapped observations.
+#'   There will be `N + noverlap - 1` in the data prior to taking overlapped samples,
+#'   which reduces to `N` after overlapping by `noverlap`.
+#'   E.g. we need 11 more observations than `N` in order to have `N` annual monthly-overlapped observations.
 #' @inheritParams calc_theo_sercor
 #'
 #' @return A factor to multiply the sample standard deviation by to give an unbiased estimate.
+#' @references \url{https://www.risk.net/risk-management/1509219/error-var-overlapping-intervals}
+
 #' @export
 #'
 #' @examples
@@ -72,8 +81,9 @@ calc_sd_ol_bias_fac <- function(N, noverlap) {
 #' Generate a matrix of overlapped Normal variates
 #'
 #' The function operates by calculating a matrix of 'pthly' variates
-#' having 1/pth the mean and standard deviation, and then scanning each row and
-#' summing the row values in overlapping sets of \code{p}.
+#' (where `p` is the extent of the overlap, i.e. the parameter `noverlap`)
+#' having 1/pth the mean and variance, and then iterating over rows and
+#' summing the row values in overlapping sets of `noverlap`.
 #'
 #' @param nsims The number of simulations (rows in the matrix).
 #' @param nsteps The number of steps (columns in the matrix).
@@ -85,8 +95,8 @@ calc_sd_ol_bias_fac <- function(N, noverlap) {
 #' @export
 #'
 #' @examples
-#' gen_ol_rnorm_mtx(100, 10, noverlap = 12)
-gen_ol_rnorm_mtx <- function(nsims, nsteps, noverlap, mu = 0, sigma = 1) {
+#' generate_ol_rnorm_mtx(100, 10, noverlap = 12)
+generate_ol_rnorm_mtx <- function(nsims, nsteps, noverlap, mu = 0, sigma = 1) {
   steps_noverlap <- nsteps + noverlap - 1
   pthly_mtx <- matrix(stats::rnorm(nsims * steps_noverlap, mean = mu / noverlap, sd = sigma / sqrt(noverlap)),
                       nrow = nsims, ncol = steps_noverlap)

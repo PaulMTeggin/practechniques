@@ -2,6 +2,8 @@
 
 A companion R package for the online book Practical Actuarial Techniques (in development).
 
+**THIS IS A PRE-RELEASE VERSION AND NO RELIANCE WHATSOEVER MAY BE PLACED ON IT.**
+
 At the time of writing (May 2022) the main feature is a framework
 using Monte Carlo simulation to calculate p-values for statistical goodness-of-fit tests
 where the parameters have been estimated from the data.

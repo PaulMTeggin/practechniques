@@ -2,7 +2,7 @@
 % Please edit documentation in R/generic_gof_tests.R
 \name{gof_test_sim_uniparam}
 \alias{gof_test_sim_uniparam}
-\title{Perform a goodness of fit test using simulation and uniparameter statistical functions}
+\title{Perform a goodness of fit test using simulation with uniparameter plug-in functions}
 \usage{
 gof_test_sim_uniparam(
   x,
@@ -20,20 +20,25 @@ gof_test_sim_uniparam(
 \arguments{
 \item{x}{The data being tested.}
 
-\item{fn_estimate_params}{A function that takes the data and returns an object representing
-the parameters of the distribution being fitted.}
+\item{fn_estimate_params}{A function that takes the data and the extent of the overlap in the data,
+and returns a single object holding estimated parameters of the distribution being fitted.
+The method of estimation should be unbiased. Note that for many distributions, MLE
+only gives \emph{asymptotically} unbiased parameters. Users should validate that their estimation
+functions are unbiased and if necessary adjust the threshold p-value to compensate for this.}
 
-\item{fn_calc_test_stat}{A function that takes the data and the estimated parameters,
+\item{fn_calc_test_stat}{A function that takes the data and the estimated parameters object,
 and calculates the test statistic for the distribution being tested.}
 
-\item{fn_simulate}{A function takes the number of values to simulate, a set of estimated parameters,
+\item{fn_simulate}{A function takes the number of values to simulate, the estimated parameters object,
 and the extent of any overlap in the data,
-and returns that number of simulated values from the distribution being tested.}
+and returns that number of simulated values from the distribution being tested against.}
 
 \item{noverlap}{The extent of any overlap in the data. \code{1} means no overlap,
 and \code{fn_simulate} should operate by ordinary simulation. If \code{noverlap > 1} then
 autocorrelation must be induced in the simulations that is consistent with the degree of overlap,
-to give unbiased test results. \code{fn_estimate_params} must also allow for the degree of overlap.}
+to give unbiased test results.
+This is done automatically when this function is called via \code{\link{gof_test_sim}}.
+\code{fn_estimate_params} must also allow for the degree of overlap.}
 
 \item{nreps}{The number of repetitions of the simulation to use.}
 
@@ -42,7 +47,7 @@ to give unbiased test results. \code{fn_estimate_params} must also allow for the
 \item{ncores}{The number of cores to use when parallelising.
 \code{NULL} means one fewer than the number of cores on the machine.}
 
-\item{bs_ci}{The width of a confidence interval around the p value,
+\item{bs_ci}{The width of a confidence interval around the p-value,
 which will be calculated using a non-parametric bootstrap.
 \code{NULL} means no confidence interval will be produced.}
 
@@ -50,46 +55,106 @@ which will be calculated using a non-parametric bootstrap.
 }
 \value{
 A list with five components:
-\itemize{
-  \item{ts}{The test statistic.}
-  \item{p_value}{The p value for the test statistic, derived by simulation.}
-  \item{count_NA}{The number of \code{NA} values produced in the simulation of the test statistic.
-  These generally indicate that the parameter estimation failed.}
-  \item{p_value_lower}{If \code{bs_ci} is not \code{NULL}, the lower end
-  of the confidence interval around the p value, calculated using
-  a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
-  Otherwise \code{NA}.}
-  \item{p_value_upper}{If \code{bs_ci} is not \code{NULL}, the upper end
-  of the confidence interval around the p value, calculated using
-  a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
-  Otherwise \code{NA}.}
+\describe{
+\item{ts}{The test statistic.}
+\item{p_value}{The p-value for the test statistic, derived by simulation.}
+\item{count_NA}{The number of \code{NA} values produced in the simulation of the test statistic.
+These generally indicate that the parameter estimation failed. These values are disregarded
+when calculating p-values.}
+\item{p_value_lower}{If \code{bs_ci} is not \code{NULL}, the lower end
+of the confidence interval around the p-value, calculated using
+a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
+Otherwise \code{NA}.}
+\item{p_value_upper}{If \code{bs_ci} is not \code{NULL}, the upper end
+of the confidence interval around the p-value, calculated using
+a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
+Otherwise \code{NA}.}
 }
 }
 \description{
 Many statistical tests have null hypotheses that assume a distribution is fully specified
 (with its parameters known in advance). It is common to estimate parameters from data,
 and in this case a general method for adapting the statistical test is to use
-simulation to derive the distribution of the test statistic, and derive the p-value from this distribution.
+Monte Carlo to produce a simulated distribution of the test statistic, and derive the p-value from this distribution.
+This approach is used in the \code{\link[KScorrect]{LcKS}} function of the \code{KScorrect} package.
+However, the implementation in \code{LcKS} only supports the KS test and a closed list of distributions,
+because it has bespoke code for each supported distribution
+for estimating parameters and simulating values using the estimated parameters.
+This function generalises the approach in \code{\link[KScorrect]{LcKS}} by
+adopting the underlying \code{LcKS} algorithm and allowing general estimation, test statistic and simulation
+functions to be plugged into that algorithm.
 }
 \details{
-Similarly in order to adapt to overlapping data when performing statistical tests,
-it is necessary to use simulation, and to simulate in a way that induces the autocorrelation
+This function uses the same general approach as \code{LcKS}, which is to:
+\itemize{
+\item Estimate parameters from the input data \code{x}
+\item Calculate a test statistic for \code{x} against the specified distribution function with these parameters
+\item Use Monte Carlo simulation to produce a simulated distribution of potential alternative values
+for the test statistic.
+\item Derive a p-value by comparing the test statistic of \code{x} against the simulated distribution.
+The p-value is calculated as the proportion of Monte Carlo samples with test statistics at least as extreme
+as the test statistic of \code{x}. A value of 1 is added to both the numerator and denominator for the same reasons as
+\code{KScorrect}, which among other reasons has the benefit of avoiding estimated p-values that are precisely zero.
+}
+
+However this function is more generic:
+\itemize{
+\item General distributions are supported, rather than the closed list used by \code{KScorrect}.
+\item Multiple statistical tests are supported, not just \href{https://en.wikipedia.org/wiki/Kolmogorov\%E2\%80\%93Smirnov_test}{KS}.
+\item Testing can be performed against distributions fitted to overlapping data, not just IID data,
+using the idea of a Gaussian copula to induce autocorrelation consistent with overlapping data suggested in section 4.2 of the
+\href{https://www.cambridge.org/core/journals/british-actuarial-journal/article/calibration-of-var-models-with-overlapping-data/B20D66D81DB918AFD3BBDF9EDAC20863}{2019 paper}
+by the \href{https://www.actuaries.org.uk/practice-areas/life/research-working-parties/extreme-events}{Extreme Events Working Party}
+of the UK \href{https://www.actuaries.org.uk/}{Institute and Faculty of Actuaries}.
+}
+
+The genericity is achieved by requiring all statistical functions involved
+to be 'uniparameter', i.e. to have all their parameters put into a single object.
+This entails wrapping (say) \code{\link[stats]{pnorm}} so the wrapper function takes a list containing the
+\code{mean} and \code{sd} parameters, and passes them on.
+
+By making all functions take their parameters as single objects, the algorithm
+used in the \code{KScorrect} package can be abstracted from the functions for estimating parameters
+(\code{fn_estimate_params}), calculating test statistics (\code{fn_calc_test_stat}),
+and simulating values using those estimated parameters (\code{fn_simulate}),
+These functions are 'plugged in' to the algorithm and called at the appropriate points.
+They must be mutually compatible with each other.
+
+For simplicity and to ensure compatibility,
+the function \code{\link{gof_test_sim}} sets up the plug-in functions automatically,
+based on the un-prefixed name of the distribution (e.g. \code{"norm"}).
+This has a slight performance hit as it uses \code{\link[base]{do.call}},
+but this can be avoided if performance is key, by hand-writing the wrapper function.
+
+Similarly, adapting to overlapping data requires the simulation to be done in a way that induces the autocorrelation
 consistent with overlapping data. This function can perform testing on overlapping data
 by suitable choice of the plug-in function \code{fn_simulate}.
 In this case the estimation function \code{fn_estimate_params} should also allow for bias
-in parameter estimation induced by the overlap.
+in parameter estimation induced by the overlap. There is no need to adapt the test statistic function
+\code{fn_calc_test_stat} to overlapping data.
 
-In order for this function to be generic, it assumes all statistical functions involved
-are uniparameter, i.e. all their parameters are put into a single object.
-This entails wrapping (say) \code{\link[stats]{pnorm}} so the wrapper takes a list containing the
-\code{mean} and \code{sd} parameters, and passes them on.
-The function \code{\link{gof_test_sim}} sets up the wrapper functions automatically,
-based on the un-prefixed name of the distribution (e.g. \code{norm}).
+For some distributions the estimation of parameters may occasionally fail within the simulation.
+In this case the test statistic is set to \code{NA} and disregarded when calculating p-values.
+Warnings produced in parameter estimation are suppressed as (e.g. when using \code{MASS::fitdistr})
+these often arise from estimating the uncertainty around the estimated parameters, which is not used here.
 
-TODO explain design further.
+The framework here can in principle also be used where parameters are known in advance
+rather than estimated from the data (by making the estimation function return the pre-specified parameters),
+but there is limited value to this use case, as Monte Carlo is rarely necessary
+when the parameters are known (and is certainly not necessary for the KS and AD tests).
+It can be an useful approach for hybrid cases such as the 3-parameter Student's t distribution
+where the number of degrees of freedom is pre-specified but the location and scale parameters are not.
+
+Optionally, the calculations can be parallelised over multiple cores using the \code{doParallel} package.
+This is useful when the number of simulations is large and estimation of parameters is slow,
+for example using MLE to estimate parameters from a generalised hyperbolic distribution.
+
+Since Monte Carlo simulation is used, the function can optionally estimate the simulation uncertainty arising from
+a finite number of simulations, using a non-parameteric (resampling with replacement) approach from
+the distribution of simulated test statistics produced.
 }
 \examples{
-fn_estimate_params <- function(x) list(mean = mean(x), sd = sd(x))
+fn_estimate_params <- function(x, noverlap = 1) list(mean = mean(x), sd = sd(x))
 fn_p <- function(x, params) pnorm(x, params$mean, params$sd)
 fn_test_statistic <- function(x, est_params) calc_ks_test_stat(x, est_params, fn_p)
 fn_simulate <- function(N, est_params) rnorm(N, est_params$mean, est_params$sd)

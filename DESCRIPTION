@@ -11,15 +11,21 @@ Description: This packages contains functions implementing techniques set out in
     where the parameters have been estimated from the data.
     This is a generalisation of the approach in the KScorrect package
     <https://cran.r-project.org/package=KScorrect>.
+    THIS IS A PRE-RELEASE VERSION AND NO RELIANCE WHATSOEVER MAY BE PLACED ON IT.
 License: GPL (>= 3)
 Encoding: UTF-8
 LazyData: true
+Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.1.2
 Suggests: 
     ADGofTest,
+    knitr,
     KScorrect,
+    nortest,
+    rmarkdown,
     testthat (>= 3.0.0)
 Imports: 
     doParallel,
     doRNG,
     foreach
+VignetteBuilder: knitr

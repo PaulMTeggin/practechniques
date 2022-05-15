@@ -21,11 +21,13 @@ Serial correlation arises from overlapped data because some of the information i
 between successive overlapping observations. The amount of serial correlation
 is a function of the lag between observations and the extent of the overlap.
 For example the serial correlation between Jan-Dec and Feb-Jan observations is higher
-than between Jan-Dec and Sep-Aug observations.
+than between Jan-Dec and Sep-Aug-next-year observations.
 }
 \details{
 The formula follows from writing each overlapping observation as the sum of
 \code{noverlap} independent observations and counting the extent to which these two sets overlap.
+Where the lag is higher than the overlap no information is shared and the theoretical
+serial correlation becomes zero.
 }
 \examples{
 calc_theo_sercor(12, 0:12)

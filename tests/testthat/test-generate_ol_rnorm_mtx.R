@@ -3,7 +3,7 @@ test_that("1m rows", {
     set.seed(1)
 
     ## Act
-    actual <- gen_ol_rnorm_mtx(1e6, 24, 12)
+    actual <- generate_ol_rnorm_mtx(1e6, 24, 12)
     actual_mean <- apply(actual, 2, mean)
     actual_sd <- apply(actual, 2, sd)
     actual_cor <- cor(actual)

@@ -1,59 +1,121 @@
-#' Perform a goodness of fit test using simulation and uniparameter statistical functions
+#' Perform a goodness of fit test using simulation with uniparameter plug-in functions
 #'
 #' Many statistical tests have null hypotheses that assume a distribution is fully specified
 #' (with its parameters known in advance). It is common to estimate parameters from data,
 #' and in this case a general method for adapting the statistical test is to use
-#' simulation to derive the distribution of the test statistic, and derive the p-value from this distribution.
+#' Monte Carlo to produce a simulated distribution of the test statistic, and derive the p-value from this distribution.
+#' This approach is used in the \code{\link[KScorrect]{LcKS}} function of the \code{KScorrect} package.
+#' However, the implementation in \code{LcKS} only supports the KS test and a closed list of distributions,
+#' because it has bespoke code for each supported distribution
+#' for estimating parameters and simulating values using the estimated parameters.
+#' This function generalises the approach in \code{\link[KScorrect]{LcKS}} by
+#' adopting the underlying `LcKS` algorithm and allowing general estimation, test statistic and simulation
+#' functions to be plugged into that algorithm.
 #'
-#' Similarly in order to adapt to overlapping data when performing statistical tests,
-#' it is necessary to use simulation, and to simulate in a way that induces the autocorrelation
+#' This function uses the same general approach as \code{LcKS}, which is to:
+#'
+#' * Estimate parameters from the input data `x`
+#' * Calculate a test statistic for `x` against the specified distribution function with these parameters
+#' * Use Monte Carlo simulation to produce a simulated distribution of potential alternative values
+#' for the test statistic.
+#' * Derive a p-value by comparing the test statistic of `x` against the simulated distribution.
+#' The p-value is calculated as the proportion of Monte Carlo samples with test statistics at least as extreme
+#' as the test statistic of `x`. A value of 1 is added to both the numerator and denominator for the same reasons as
+#' `KScorrect`, which among other reasons has the benefit of avoiding estimated p-values that are precisely zero.
+#'
+#' However this function is more generic:
+#' * General distributions are supported, rather than the closed list used by `KScorrect`.
+#' * Multiple statistical tests are supported, not just [KS](https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test).
+#' * Testing can be performed against distributions fitted to overlapping data, not just IID data,
+#' using the idea of a Gaussian copula to induce autocorrelation consistent with overlapping data suggested in section 4.2 of the
+#' [2019 paper](https://www.cambridge.org/core/journals/british-actuarial-journal/article/calibration-of-var-models-with-overlapping-data/B20D66D81DB918AFD3BBDF9EDAC20863)
+#' by the [Extreme Events Working Party](https://www.actuaries.org.uk/practice-areas/life/research-working-parties/extreme-events)
+#' of the UK [Institute and Faculty of Actuaries](https://www.actuaries.org.uk/).
+#'
+#' The genericity is achieved by requiring all statistical functions involved
+#' to be 'uniparameter', i.e. to have all their parameters put into a single object.
+#' This entails wrapping (say) \code{\link[stats]{pnorm}} so the wrapper function takes a list containing the
+#' `mean` and `sd` parameters, and passes them on.
+#'
+#' By making all functions take their parameters as single objects, the algorithm
+#' used in the `KScorrect` package can be abstracted from the functions for estimating parameters
+#' (`fn_estimate_params`), calculating test statistics (`fn_calc_test_stat`),
+#' and simulating values using those estimated parameters (`fn_simulate`),
+#' These functions are 'plugged in' to the algorithm and called at the appropriate points.
+#' They must be mutually compatible with each other.
+#'
+#' For simplicity and to ensure compatibility,
+#' the function \code{\link{gof_test_sim}} sets up the plug-in functions automatically,
+#' based on the un-prefixed name of the distribution (e.g. `"norm"`).
+#' This has a slight performance hit as it uses \code{\link[base]{do.call}},
+#' but this can be avoided if performance is key, by hand-writing the wrapper function.
+#'
+#' Similarly, adapting to overlapping data requires the simulation to be done in a way that induces the autocorrelation
 #' consistent with overlapping data. This function can perform testing on overlapping data
 #' by suitable choice of the plug-in function \code{fn_simulate}.
 #' In this case the estimation function \code{fn_estimate_params} should also allow for bias
-#' in parameter estimation induced by the overlap.
+#' in parameter estimation induced by the overlap. There is no need to adapt the test statistic function
+#' `fn_calc_test_stat` to overlapping data.
 #'
-#' In order for this function to be generic, it assumes all statistical functions involved
-#' are uniparameter, i.e. all their parameters are put into a single object.
-#' This entails wrapping (say) \code{\link[stats]{pnorm}} so the wrapper takes a list containing the
-#' \code{mean} and \code{sd} parameters, and passes them on.
-#' The function \code{\link{gof_test_sim}} sets up the wrapper functions automatically,
-#' based on the un-prefixed name of the distribution (e.g. \code{norm}).
+#' For some distributions the estimation of parameters may occasionally fail within the simulation.
+#' In this case the test statistic is set to `NA` and disregarded when calculating p-values.
+#' Warnings produced in parameter estimation are suppressed as (e.g. when using `MASS::fitdistr`)
+#' these often arise from estimating the uncertainty around the estimated parameters, which is not used here.
 #'
-#' TODO explain design further.
+#' The framework here can in principle also be used where parameters are known in advance
+#' rather than estimated from the data (by making the estimation function return the pre-specified parameters),
+#' but there is limited value to this use case, as Monte Carlo is rarely necessary
+#' when the parameters are known (and is certainly not necessary for the KS and AD tests).
+#' It can be an useful approach for hybrid cases such as the 3-parameter Student's t distribution
+#' where the number of degrees of freedom is pre-specified but the location and scale parameters are not.
+#'
+#' Optionally, the calculations can be parallelised over multiple cores using the `doParallel` package.
+#' This is useful when the number of simulations is large and estimation of parameters is slow,
+#' for example using MLE to estimate parameters from a generalised hyperbolic distribution.
+#'
+#' Since Monte Carlo simulation is used, the function can optionally estimate the simulation uncertainty arising from
+#' a finite number of simulations, using a non-parameteric (resampling with replacement) approach from
+#' the distribution of simulated test statistics produced.
 #'
 #' @param x The data being tested.
-#' @param fn_estimate_params A function that takes the data and returns an object representing
-#'   the parameters of the distribution being fitted.
-#' @param fn_calc_test_stat A function that takes the data and the estimated parameters,
+#' @param fn_estimate_params A function that takes the data and the extent of the overlap in the data,
+#'   and returns a single object holding estimated parameters of the distribution being fitted.
+#'   The method of estimation should be unbiased. Note that for many distributions, MLE
+#'   only gives *asymptotically* unbiased parameters. Users should validate that their estimation
+#'   functions are unbiased and if necessary adjust the threshold p-value to compensate for this.
+#' @param fn_calc_test_stat A function that takes the data and the estimated parameters object,
 #'   and calculates the test statistic for the distribution being tested.
-#' @param fn_simulate A function takes the number of values to simulate, a set of estimated parameters,
+#' @param fn_simulate A function takes the number of values to simulate, the estimated parameters object,
 #'   and the extent of any overlap in the data,
-#'   and returns that number of simulated values from the distribution being tested.
-#' @param noverlap The extent of any overlap in the data. \code{1} means no overlap,
-#'   and \code{fn_simulate} should operate by ordinary simulation. If \code{noverlap > 1} then
+#'   and returns that number of simulated values from the distribution being tested against.
+#' @param noverlap The extent of any overlap in the data. `1` means no overlap,
+#'   and \code{fn_simulate} should operate by ordinary simulation. If `noverlap > 1` then
 #'   autocorrelation must be induced in the simulations that is consistent with the degree of overlap,
-#'   to give unbiased test results. \code{fn_estimate_params} must also allow for the degree of overlap.
+#'   to give unbiased test results.
+#'   This is done automatically when this function is called via \code{\link{gof_test_sim}}.
+#'   `fn_estimate_params` must also allow for the degree of overlap.
 #' @param nreps The number of repetitions of the simulation to use.
 #' @param parallelise Flag indicating whether or not to parallelise the calculations.
 #' @param ncores The number of cores to use when parallelising.
 #'   \code{NULL} means one fewer than the number of cores on the machine.
-#' @param bs_ci The width of a confidence interval around the p value,
+#' @param bs_ci The width of a confidence interval around the p-value,
 #'   which will be calculated using a non-parametric bootstrap.
 #'   \code{NULL} means no confidence interval will be produced.
 #' @param nreps_bs_ci The number of iterations used in the bootstrapped confidence interval.
 #'
 #' @return A list with five components:
-#' \itemize{
+#' \describe{
 #'   \item{ts}{The test statistic.}
-#'   \item{p_value}{The p value for the test statistic, derived by simulation.}
+#'   \item{p_value}{The p-value for the test statistic, derived by simulation.}
 #'   \item{count_NA}{The number of \code{NA} values produced in the simulation of the test statistic.
-#'   These generally indicate that the parameter estimation failed.}
+#'   These generally indicate that the parameter estimation failed. These values are disregarded
+#'   when calculating p-values.}
 #'   \item{p_value_lower}{If \code{bs_ci} is not \code{NULL}, the lower end
-#'   of the confidence interval around the p value, calculated using
+#'   of the confidence interval around the p-value, calculated using
 #'   a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
 #'   Otherwise \code{NA}.}
 #'   \item{p_value_upper}{If \code{bs_ci} is not \code{NULL}, the upper end
-#'   of the confidence interval around the p value, calculated using
+#'   of the confidence interval around the p-value, calculated using
 #'   a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
 #'   Otherwise \code{NA}.}
 #' }
@@ -61,7 +123,7 @@
 #' @importFrom foreach %dopar%
 #'
 #' @examples
-#' fn_estimate_params <- function(x) list(mean = mean(x), sd = sd(x))
+#' fn_estimate_params <- function(x, noverlap = 1) list(mean = mean(x), sd = sd(x))
 #' fn_p <- function(x, params) pnorm(x, params$mean, params$sd)
 #' fn_test_statistic <- function(x, est_params) calc_ks_test_stat(x, est_params, fn_p)
 #' fn_simulate <- function(N, est_params) rnorm(N, est_params$mean, est_params$sd)
@@ -82,7 +144,6 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
                 p_value_lower = NA, p_value_upper = NA,
                 count_NA = NA))
   }
-
 
   N <- length(x)
 
@@ -130,7 +191,7 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
     ))
   }
 
-  # Count the NA values and then remove them for the calculation of the p value
+  # Count the NA values and then remove them for the calculation of the p-value
   count_NA <- sum(is.na(teststat_sims))
   teststat_sims <- stats::na.omit(teststat_sims)
 
@@ -143,7 +204,7 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
 
   bs_p_value_ci <- .bootstrap_p_value_ci(bs_ci, nreps_bs_ci, teststat_sims, teststat_x)
 
-  # Output the test statistic, p value (and the lower and upper ends of the
+  # Output the test statistic, p-value (and the lower and upper ends of the
   # confidence interval around it, if available)
   # and the number of NA values produced in the simulation of test statistics
   return(list(ts = teststat_x, p_value = p_value,
@@ -151,29 +212,33 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
               count_NA = count_NA))
 }
 
+# Internal function to validate the values of the parameters parallelise and ncores
 .validate_parallelise_ncores <- function(parallelise, ncores) {
   if (!parallelise & !is.null(ncores))
-    stop("You specified to use multiple 'cores' but not to run in parallel. Set parallelise = TRUE to run in parallel.")
+    stop("You specified to use multiple cores but not to run in parallel. Set parallelise = TRUE to run in parallel.")
 
   if (parallelise & !is.null(ncores)) {
     if (is.numeric(ncores)) {
       ncores <- as.integer(ncores)
 
       if (ncores < 2)
-        stop("Set 'ncores' to integer greater than 1 to run in parallel.")
+        stop("Set ncores to an integer greater than 1 to run in parallel.")
       if (ncores > parallel::detectCores())
-        warning("You are attempting to run this function on more cores than your computer contains. Consider reducing 'cores' to improve efficiency.")
+        warning("You are attempting to run this function on more cores than your computer contains. Consider reducing ncores to improve efficiency.")
     }
     else {
-      stop("Set 'ncores' to integer greater than 1 to run in parallel.")
+      stop("Set ncores to an integer greater than 1 to run in parallel.")
     }
   }
 }
 
+# Internal function to calculate the proportion of test statistics exceeding the test statistic obtained from the data
+# This uses the same approach as KScorrect in adding one to the numerator and denominator
 .calc_prop_higher <- function(teststat_sims, teststat_x) {
   (sum(teststat_sims > teststat_x) + 1) / (length(teststat_sims) + 1)
 }
 
+# Internal function to give a confidence interval around the p-value using a non-parametric bootstrap
 .bootstrap_p_value_ci <- function(bs_ci, nreps_bs_ci, teststat_sims, teststat_x) {
   if (is.null(bs_ci)) {
     p_value_lower = NA
@@ -193,15 +258,48 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
   return(list(p_value_lower = p_value_lower, p_value_upper = p_value_upper))
 }
 
-
 #' Perform a goodness of fit test using simulation
 #'
 #' Many statistical tests have null hypotheses that assume a distribution is fully specified
 #' (with its parameters known in advance). It is common to estimate parameters from data,
 #' and in this case a general method for adapting the statistical test is to use
-#' simulation to derive the distribution of the test statistic, and derive the p-value from this distribution.
+#' Monte Carlo to produce a simulated distribution of the test statistic, and derive the p-value from this distribution.
+#' This approach is used in the \code{\link[KScorrect]{LcKS}} function of the \code{KScorrect} package.
+#' However, the implementation in \code{LcKS} only supports the KS test and a closed list of distributions,
+#' because it has bespoke code for each supported distribution
+#' for estimating parameters and simulating values using the estimated parameters.
+#' This function generalises the approach in \code{\link[KScorrect]{LcKS}} as explained in the documentation
+#' of \code{\link{gof_test_sim_uniparam}}. It is a higher-level function
+#' that configures \code{\link{gof_test_sim_uniparam}} appropriately given the name of the distribution being
+#' tested against. It is still necessary to provide an appropriate estimation function for \code{fn_estimate_params}
+#' that is adapted to the distribution being tested including whether or not data is overlapping.
 #'
-#' TODO explain relationship to gof_test_sim_uniparam
+#' As far as possible this function abstracts from
+#' the lower-level implementation details of \code{\link{gof_test_sim_uniparam}}, by taking the name of
+#' a distribution function (e.g. `"norm"`) and creating uniparameter versions of the CDF
+#' ("p" function, so `pnorm` in this example) and simulation ("r" functions, here `rnorm`).
+#' Where overlapping data is used (`noverlap > 1`) it will simulate from a Gaussian copula
+#' to induce the same autocorrelation structure as overlapping data
+#' (see \code{\link{calc_theo_sercor}}), convert this to autocorrelated random uniform values,
+#' and apply a uniparameter version of the inverse CDF ("q" function) for `"dist"`.
+#'
+#' Notwithstanding this abstraction, it is necessary to supply an appropriate parameter estimation function
+#' for `fn_estimate_params`. \code{\link{estimate_mean_sd_ol}} is used by default, to match with the
+#' default value of `dist = "norm"`.
+#'
+#' The framework here can in principle also be used where parameters are known in advance
+#' rather than estimated from the data (by making the estimation function return the pre-specified parameters),
+#' but there is very little value to this use case, as Monte Carlo is rarely necessary
+#' when the parameters are known (and is certainly not necessary for the KS and AD tests).
+#'
+#' Optionally, the calculations can be parallelised over multiple cores.
+#' This is useful when the number of simulations is large
+#' and estimation of parameters is slow,
+#' for example using MLE to estimate parameters from a generalised hyperbolic distribution.
+#'
+#' Since Monte Carlo simulation is used, the function can optionally estimate the simulation uncertainty arising from
+#' a finite number of simulations, using a non-parameteric (resampling with replacement) approach from
+#' the distribution of simulated test statistics produced.
 #'
 #' @inheritParams gof_test_sim_uniparam
 #' @param test_type The type of the test. Either a character string (KS and AD are supported)
@@ -210,23 +308,19 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
 #' @param dist The name of a distribution, such that it can be prepended by \code{"p"} to get
 #'   a probability function, and by \code{"r"} to get a random simulation function.
 #'   For example \code{"norm"} or \code{"unif"}.
-#' @param noverlap The extent of any overlap in the data. \code{1} means no overlap,
-#'   and the test operates by ordinary simulation. If \code{noverlap > 1} then
-#'   autocorrelation will be induced in the simulations that is consistent with the degree of overlap,
-#'   to give unbiased test results. \code{fn_estimate_params} must also allow for the degree of overlap.
 #'
 #' @return A list with five components:
-#' \itemize{
+#' \describe{
 #'   \item{ts}{The test statistic.}
-#'   \item{p_value}{The p value for the test statistic, derived by simulation.}
+#'   \item{p_value}{The p-value for the test statistic, derived by simulation.}
 #'   \item{count_NA}{The number of \code{NA} values produced in the simulation of the test statistic.
 #'   These generally indicate that the parameter estimation failed.}
 #'   \item{p_value_lower}{If \code{bs_ci} is not \code{NULL}, the lower end
-#'   of the confidence interval around the p value, calculated using
+#'   of the confidence interval around the p-value, calculated using
 #'   a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
 #'   Otherwise \code{NA}.}
 #'   \item{p_value_upper}{If \code{bs_ci} is not \code{NULL}, the upper end
-#'   of the confidence interval around the p value, calculated using
+#'   of the confidence interval around the p-value, calculated using
 #'   a non-parametric bootstrap with \code{nreps_bs_ci} repetitions.
 #'   Otherwise \code{NA}.}
 #' }
@@ -234,9 +328,9 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
 #'
 #' @examples
 #' gof_test_sim(rnorm(100))
-#' estimate_unif <- function(x) list(min = min(x), max = max(x))
+#' estimate_unif <- function(x, noverlap = 1) list(min = min(x), max = max(x))
 #' gof_test_sim(runif(100), dist = "unif", fn_estimate_params = estimate_unif)
-gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap = 1, fn_estimate_params = estimate_MoM_2,
+gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap = 1, fn_estimate_params = estimate_mean_sd_ol,
                          nreps=999, parallelise = FALSE, ncores = NULL,
                          bs_ci = NULL, nreps_bs_ci = 10000) {
   if (is.character(test_type)) {
@@ -252,7 +346,11 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
     stop("test_type should either be a character variable naming the kind of test or a function calculating the test statistic")
   }
 
-  # Define this function here so it exists for parallelised execution
+  # In general params will be a list return by an estimation function, so just tack the x argument
+  # on the front for do.call purposes later. However sometimes the params may be a bespoke object
+  # of some kind, e.g. the result of calling ghyp() from the ghyp package, and needs to be wrapped in a list.
+  # Define this function here so it exists for parallelised execution and does not need to be explicitly exported
+  # as part of parallelisation.
   .build_uniparam_args <- function(x, params) {
     if (is.list(params)) {
       arg_list <- c(list(x), params)
@@ -263,6 +361,8 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
     return(arg_list)
   }
 
+  # Find the "p function" (e.g. pnorm) corresponding to dist,
+  # and construct a uniparameter version of it using do.call
   fn_p <- get(paste0("p", dist))
   fn_p_uniparam <- function(q, params) {
     arg_list <- .build_uniparam_args(q, params)
@@ -270,8 +370,13 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
     return(do.call(fn_p, arg_list))
   }
 
+  # The "p" function is used as part of calculating the test statistic
+  # - construct a uniparameter version of that function that captures the p function.
   fn_calc_test_stat_built <- .build_calc_test_stat(fn_calc_test_stat, fn_p = fn_p_uniparam)
 
+  # For the simulation function, there are two cases to consider: no overlap (noverlap == 1),
+  # when we can simulate by using the "r" function corresponding to dist and creating a uniparameter wrapper,
+  # or with overlap, when we have to use a Gaussian copula approach per the Extreme Events Working Party paper.
   if (noverlap == 1) {
     fn_r <- get(paste0("r", dist))
     fn_simulate_uniparam <- function(n, params) {
@@ -289,7 +394,7 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
       # data being tested, which is the case in practice.
       ol_chol <- chol(build_theo_sercor_mtx(length(x), noverlap))
 
-      # Get the inverse CDF so we can simulate with autocorrelation
+      # Get the inverse CDF ("q" function) so we can simulate with autocorrelation
       # by applying a Gaussian copula to uniforms and inverting
       fn_q <- get(paste0("q", dist))
 
@@ -306,7 +411,7 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
     }
   }
 
-
+  # Now we have all our plugin functions and just use them with gof_test_sim_uniparam
   return(gof_test_sim_uniparam(x = x,
                                fn_estimate_params = fn_estimate_params,
                                fn_calc_test_stat = fn_calc_test_stat_built,
@@ -319,98 +424,9 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
 
 }
 
-#' Calculate the one-sample KS test statistic of data against a fitted distribution
-#'
-#' The purpose of this function is to allow the KS test statistic to be calculated
-#' for a wide range of distributions, i.e. to abstract the calculation of the test
-#' statistic from the CDF (p) function.
-#' This requires the estimated parameters to be specified as a single object.
-#'
-#' @param x The data.
-#' @param fn_p The cumulative distribution function of the distribution,
-#'   in the form of a function that takes the data and estimated parameters as a single object,
-#'   and returns cumulative probability values.
-#' @param params The parameters of the distribution, generally estimated from the data.
-#'
-#' @return The KS test statistic.
-#' @export
-#'
-#' @examples
-#' set.seed(1)
-#' x <- rnorm(100)
-#' params <- list(mean = mean(x), sd = sd(x))
-#' calc_ks_test_stat(x, params, function(x, params) pnorm(x, params$mean, params$sd))
-#' stats::ks.test(x, "pnorm", mean(x), sd(x))$statistic
-calc_ks_test_stat <- function(x, params, fn_p)
-{
-  N <- length(x)
-  p <- fn_p(sort(x), params)
-
-  diffs <- p - (0:(N - 1)) / N
-  D <- max(c(diffs, 1 / N - diffs))
-  return(D)
-}
-
-#' Calculate the AD test statistic of data against a fitted distribution
-#'
-#' The purpose of this function is to allow the AD test statistic to be calculated
-#' for a wide range of distributions, i.e. to abstract the calculation of the test
-#' statistic from the CDF (p) function.
-#' This requires the estimated parameters to be specified as a single object.
-#'
-#' @param x The data.
-#' @param fn_p The cumulative distribution function of the distribution,
-#'   in the form of a function that takes the data and estimated parameters as a single object,
-#'   and returns cumulative probability values.
-#' @param params The parameters of the distribution, generally estimated from the data.
-#'
-#' @return The AD test statistic.
-#' @export
-#'
-#' @examples
-#' set.seed(1)
-#' x <- rnorm(100)
-#' params <- list(mean = mean(x), sd = sd(x))
-#' calc_ad_test_stat(x, params, function(x, params) pnorm(x, params$mean, params$sd))
-#' # ADGofTest::ad.test(x, "pnorm", mean(x), sd(x))$statistic
-calc_ad_test_stat <- function(x, params, fn_p) {
-  N <- length(x)
-  p <- fn_p(sort(x), params)
-
-  A <- p * (1 - rev(p))
-  A <- (2 * seq(p) - 1) * log(A)
-  return(-mean(A) - N)
-}
-
+# Internal function that builds a function to calculate test statistics from data and estimated parameters
+# by capturing the CDF (p) function. This gives a unified signature for use in gof_test_sim_uniparam.
 .build_calc_test_stat <- function(fn_calc, fn_p) {
   captured_fn_p <- fn_p
   function(x, params) fn_calc(x, params, captured_fn_p)
 }
-
-estimate_MoM_2 <- function(x, noverlap = 1) {
-  list(mean = mean(x), sd = stats::sd(x) * calc_sd_ol_bias_fac(length(x), noverlap))
-}
-
-# ks_test_epd_norm_uniparam <- function(x, nreps = 999,
-#                                       parallelise = FALSE,
-#                                       ncores = NULL,
-#                                       bs_ci = NULL, nreps_bs_ci = 10000) {
-#   pnorm_uniparam <- function(x, params) {
-#     stats::pnorm(x, params$mean, params$sd)
-#   }
-#
-#   rnorm_uniparam <- function(n, params) {
-#     stats::rnorm(n, params$mean, params$sd)
-#   }
-#
-#   gof_test_epd(x,
-#                fn_estimate_params = estimate_MoM_2,
-#                fn_calc_test_stat = build_calc_test_stat(calc_ks_test_stat, pnorm_uniparam),
-#                fn_simulate = rnorm_uniparam,
-#                noverlap = 1,
-#                nreps = nreps,
-#                parallelise = parallelise,
-#                ncores = ncores,
-#                bs_ci = bs_ci, nreps_bs_ci = nreps_bs_ci)
-# }
-
