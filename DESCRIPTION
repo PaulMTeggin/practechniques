@@ -1,11 +1,16 @@
 Package: practechniques
 Type: Package
 Title: Functions for the Practical Actuarial Techniques online book
-Version: 0.1.0
+Version: 0.0.0.999
 Author: Paul Teggin
 Maintainer: Paul Teggin <paul.teggin@polyact.co.uk>
 Description: This packages contains functions implementing techniques set out in the
-    Practical Actuarial Techniques online book.
+    Practical Actuarial Techniques online book (forthcoming).
+    At the time of writing (May 2022) the main feature is a framework
+    using Monte Carlo simulation to calculate p-values for statistical goodness-of-fit tests
+    where the parameters have been estimated from the data.
+    This is a generalisation of the approach in the KScorrect package
+    <https://cran.r-project.org/package=KScorrect>.
 License: GPL (>= 3)
 Encoding: UTF-8
 LazyData: true
