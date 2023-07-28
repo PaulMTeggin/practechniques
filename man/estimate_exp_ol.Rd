@@ -15,8 +15,7 @@ but required for compatibility with \code{\link{gof_test_sim}}.}
 \value{
 A list with one item:
 \describe{
-\item{mean}{the mean of \code{x}}
-\item{sd}{the standard deviation of \code{x} adjusted for overlapping data bias, if any}
+\item{rate}{the rate parameter, calculated as the reciprocal of the mean of \code{x}}
 }
 }
 \description{

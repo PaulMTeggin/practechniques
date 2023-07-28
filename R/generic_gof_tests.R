@@ -129,7 +129,7 @@
 #' fn_simulate <- function(N, est_params) rnorm(N, est_params$mean, est_params$sd)
 #' gof_test_sim_uniparam(rnorm(100), fn_estimate_params, fn_test_statistic, fn_simulate)
 gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_simulate, noverlap = 1,
-                                  nreps=999, parallelise = FALSE, ncores = NULL,
+                                  nreps = 999, parallelise = FALSE, ncores = NULL,
                                   bs_ci = NULL, nreps_bs_ci = 10000) {
 
   .validate_parallelise_ncores(parallelise, ncores)
@@ -169,7 +169,7 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
     on.exit(parallel::stopCluster(cl))
 
     teststat_sims <- suppressMessages(suppressWarnings( # Suppression because estimation can produce lots of messages
-      foreach::foreach(seq_len(nreps), .combine = c, .inorder = FALSE) %dopar% {
+      foreach::foreach(seq_len(nreps), .combine = c, .inorder = FALSE, .packages = "practechniques") %dopar% {
         tryCatch({
           sim_data <- fn_simulate(N, estimated_params)
           sim_params <- fn_estimate_params(sim_data, noverlap)
@@ -346,29 +346,10 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
     stop("test_type should either be a character variable naming the kind of test or a function calculating the test statistic")
   }
 
-  # In general params will be a list returned by an estimation function, so just tack the x argument
-  # on the front for do.call purposes later. However sometimes the params may be a bespoke object
-  # of some kind, e.g. the result of calling ghyp() from the ghyp package, and needs to be wrapped in a list.
-  # Define this function here so it exists for parallelised execution and does not need to be explicitly exported
-  # as part of parallelisation.
-  .build_uniparam_args <- function(x, params) {
-    if (is.list(params)) {
-      arg_list <- c(list(x), params)
-    } else {
-      arg_list <- c(list(x), list(params))
-    }
-
-    return(arg_list)
-  }
-
   # Find the "p function" (e.g. pnorm) corresponding to dist,
   # and construct a uniparameter version of it using do.call
-  fn_p <- get(paste0("p", dist))
-  fn_p_uniparam <- function(q, params) {
-    arg_list <- .build_uniparam_args(q, params)
-
-    return(do.call(fn_p, arg_list))
-  }
+  fn_p <- get_prefixed_dist_fn("p", dist)
+  fn_p_uniparam <- build_uniparam_fn(fn = fn_p)
 
   # The "p" function is used as part of calculating the test statistic
   # - construct a uniparameter version of that function that captures the p function.
@@ -378,12 +359,7 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
   # when we can simulate by using the "r" function corresponding to dist and creating a uniparameter wrapper,
   # or with overlap, when we have to use a Gaussian copula approach per the Extreme Events Working Party paper.
   if (noverlap == 1) {
-    fn_r <- get(paste0("r", dist), mode = "function")
-    fn_simulate_uniparam <- function(n, params) {
-      arg_list <- .build_uniparam_args(n, params)
-
-      return(do.call(fn_r, arg_list))
-    }
+    fn_simulate_uniparam <- build_uniparam_fn("r", dist)
   } else {
     noverlap = as.integer(noverlap)
     if (noverlap > 1) {
@@ -396,13 +372,13 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
 
       # Get the inverse CDF ("q" function) so we can simulate with autocorrelation
       # by applying a Gaussian copula to uniforms and inverting
-      fn_q <- get(paste0("q", dist), mode = "function")
+      fn_q <- get_prefixed_dist_fn("q", dist)
 
       fn_simulate_uniparam <- function(n, params) {
         # Get autocorrelated uniform values using a Gaussian copula approach
         p <- stats::pnorm((stats::rnorm(n) %*% ol_chol)[1,]) # The [1,] just converts from an n x 1 matrix to a vector
 
-        arg_list <- .build_uniparam_args(p, params)
+        arg_list <- build_uniparam_args(p, params)
 
         return(do.call(fn_q, arg_list))
       }
@@ -422,11 +398,4 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
                                bs_ci = bs_ci, nreps_bs_ci = nreps_bs_ci))
 
 
-}
-
-# Internal function that builds a function to calculate test statistics from data and estimated parameters
-# by capturing the CDF (p) function. This gives a unified signature for use in gof_test_sim_uniparam.
-.build_calc_test_stat <- function(fn_calc, fn_p) {
-  captured_fn_p <- fn_p
-  function(x, params) fn_calc(x, params, captured_fn_p)
 }
