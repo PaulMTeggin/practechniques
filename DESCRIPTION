@@ -27,5 +27,7 @@ Suggests:
 Imports: 
     doParallel,
     doRNG,
-    foreach
+    foreach,
+    purrr,
+    tidyr
 VignetteBuilder: knitr
