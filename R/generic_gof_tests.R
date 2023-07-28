@@ -331,7 +331,7 @@ gof_test_sim_uniparam <- function(x, fn_estimate_params, fn_calc_test_stat, fn_s
 #' estimate_unif <- function(x, noverlap = 1) list(min = min(x), max = max(x))
 #' gof_test_sim(runif(100), dist = "unif", fn_estimate_params = estimate_unif)
 gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap = 1, fn_estimate_params = estimate_mean_sd_ol,
-                         nreps=999, parallelise = FALSE, ncores = NULL,
+                         nreps = 999, parallelise = FALSE, ncores = NULL,
                          bs_ci = NULL, nreps_bs_ci = 10000) {
   if (is.character(test_type)) {
     test_type <- match.arg(test_type)
@@ -346,7 +346,7 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
     stop("test_type should either be a character variable naming the kind of test or a function calculating the test statistic")
   }
 
-  # In general params will be a list return by an estimation function, so just tack the x argument
+  # In general params will be a list returned by an estimation function, so just tack the x argument
   # on the front for do.call purposes later. However sometimes the params may be a bespoke object
   # of some kind, e.g. the result of calling ghyp() from the ghyp package, and needs to be wrapped in a list.
   # Define this function here so it exists for parallelised execution and does not need to be explicitly exported
@@ -378,7 +378,7 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
   # when we can simulate by using the "r" function corresponding to dist and creating a uniparameter wrapper,
   # or with overlap, when we have to use a Gaussian copula approach per the Extreme Events Working Party paper.
   if (noverlap == 1) {
-    fn_r <- get(paste0("r", dist))
+    fn_r <- get(paste0("r", dist), mode = "function")
     fn_simulate_uniparam <- function(n, params) {
       arg_list <- .build_uniparam_args(n, params)
 
@@ -396,7 +396,7 @@ gof_test_sim <- function(x, test_type = c("KS", "AD"), dist = "norm", noverlap =
 
       # Get the inverse CDF ("q" function) so we can simulate with autocorrelation
       # by applying a Gaussian copula to uniforms and inverting
-      fn_q <- get(paste0("q", dist))
+      fn_q <- get(paste0("q", dist), mode = "function")
 
       fn_simulate_uniparam <- function(n, params) {
         # Get autocorrelated uniform values using a Gaussian copula approach

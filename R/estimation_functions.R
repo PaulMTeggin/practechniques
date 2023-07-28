@@ -9,8 +9,7 @@
 #'
 #' @return A list with one item:
 #' \describe{
-#'   \item{mean}{the mean of `x`}
-#'   \item{sd}{the standard deviation of \code{x} adjusted for overlapping data bias, if any}
+#'   \item{rate}{the rate parameter, calculated as the reciprocal of the mean of `x`}
 #' }
 #' @family Estimation functions
 #' @export
